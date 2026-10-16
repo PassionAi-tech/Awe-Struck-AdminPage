@@ -92,6 +92,24 @@ td input:focus,td select:focus{border-color:#b6c8ae;background:#fff;box-shadow:0
 @media(max-width:1000px){.visual-analytics{grid-template-columns:1fr}.budget-visual{justify-content:flex-start}}
 @media(max-width:520px){.bar-item{grid-template-columns:76px minmax(30px,1fr) auto;gap:7px}.budget-visual{gap:16px}.budget-donut{width:118px;height:118px;flex-basis:118px}.donut-hole{width:78px;height:78px}.donut-hole strong{font-size:20px}}
 
+/* Premium dashboard details */
+.sales-trend-panel{margin:0 0 16px}
+.sales-trend-chart{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;align-items:end;min-height:170px;padding:20px 4px 0}
+.trend-month{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:9px;min-width:0;height:150px}
+.trend-value{font-size:10px;font-weight:750;color:var(--ink);white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+.trend-bar-zone{height:100px;width:min(100%,42px);display:flex;align-items:flex-end;justify-content:center;background:#f2f5ef;border-radius:10px 10px 5px 5px;overflow:hidden}
+.trend-bar{width:100%;min-height:3px;border-radius:8px 8px 3px 3px;background:linear-gradient(180deg,#a8bea0,#71866d);transition:height .35s ease}
+.trend-label{font-size:10px;color:var(--muted);white-space:nowrap}
+.stock-watch-list{display:grid;gap:9px}
+.stock-watch-item{display:flex;align-items:center;gap:10px;padding:10px;border-radius:12px;background:#f8faf7}
+.stock-watch-symbol{width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:#eaf0e7;color:#61785b;flex:0 0 34px}
+.stock-watch-copy{min-width:0;flex:1}
+.stock-watch-copy b{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stock-watch-copy small{display:block;color:var(--muted);font-size:10px;margin-top:2px}
+.stock-watch-qty{font-size:11px;font-weight:800;padding:5px 8px;border-radius:999px;background:#fff0e5;color:#a35e2a;white-space:nowrap}
+.stock-watch-ok{font-size:12px;color:#61785b;background:#f1f6ee;border-radius:12px;padding:14px}
+@media(max-width:520px){.sales-trend-chart{gap:6px;padding-inline:0}.trend-value{font-size:9px}.trend-bar-zone{width:min(100%,32px)}.trend-label{font-size:9px}.stock-watch-item{padding:8px}}
+
 </style></head>
 <body><div class="app">
 <aside class="side">
@@ -122,6 +140,8 @@ td input:focus,td select:focus{border-color:#b6c8ae;background:#fff;box-shadow:0
 <div class="panel chart-panel"><div class="panel-head"><div><h3>Spending overview</h3><p>Where your recorded expenses are going</p></div><span class="chart-tag">BY CATEGORY</span></div><div id="spend-chart" class="bar-chart"></div><div id="spend-chart-empty" class="chart-empty">Add expenses to see your spending visualised.</div></div>
 <div class="panel chart-panel"><div class="panel-head"><div><h3>Budget health</h3><p>Planned allocation versus remaining budget</p></div><span class="chart-tag">ALLOCATION</span></div><div class="budget-visual"><div id="budget-donut" class="budget-donut"><div class="donut-hole"><strong id="donut-percent">0%</strong><small>allocated</small></div></div><div class="donut-legend"><div><i class="legend-dot planned-dot"></i><span>Allocated</span><b id="donut-planned">₹0</b></div><div><i class="legend-dot remaining-dot"></i><span>Unallocated</span><b id="donut-remaining">₹0</b></div><div><i class="legend-dot spent-dot"></i><span>Spent</span><b id="donut-spent">₹0</b></div></div></div><div class="chart-footnote">Based on your budget plan and recorded expenses.</div></div>
 </div>
+<div class="panel chart-panel sales-trend-panel"><div class="panel-head"><div><h3>Sales pulse</h3><p>Monthly sales revenue from the records you enter</p></div><span class="chart-tag">LAST 6 MONTHS</span></div><div id="sales-trend-chart" class="sales-trend-chart"></div><div id="sales-trend-empty" class="chart-empty">Your sales trend will appear here after you record sales.</div></div>
+<div class="panel stock-watch-panel"><div class="panel-head"><div><h3>Stock watch</h3><p>Keep an eye on items running low</p></div><button class="secondary" data-go="inventory">Manage stock ↗</button></div><div id="stock-watch-list" class="stock-watch-list"></div></div>
 <div class="twocol"><div>
 <div class="panel"><div class="panel-head"><div><h3>Budget at a glance</h3><p>Planned allocation compared with your overall budget</p></div><button class="secondary" data-go="budget">Edit budget ↗</button></div><div class="progress-meta"><span>Allocated</span><b id="allocated-text">₹0 / ₹0</b></div><div class="progress-track"><div class="progress-fill" id="budget-progress"></div></div><div class="category-list" id="dashboard-categories" style="margin-top:20px"></div></div>
 <div class="panel"><div class="panel-head"><div><h3>Recent expenses</h3><p>Latest recorded spending</p></div><button class="secondary" data-go="expenses">View all ↗</button></div><div id="recent-expenses"></div></div>
@@ -176,6 +196,9 @@ const spendChart=$('spend-chart'),spendEmpty=$('spend-chart-empty');
 if(spendChart&&spendEmpty){const groups={};data.expenses.forEach(r=>{const k=String(r.category||'Other');groups[k]=(groups[k]||0)+(Number(r.amount)||0)});const rows=Object.entries(groups).sort((a,b)=>b[1]-a[1]).slice(0,5);const max=Math.max(1,...rows.map(r=>r[1]));spendChart.innerHTML=rows.map(([name,value])=>'<div class="bar-item"><span class="bar-label" title="'+esc(name)+'">'+esc(name)+'</span><div class="bar-track"><div class="bar-fill" style="width:'+Math.max(2,100*value/max)+'%"></div></div><b class="bar-value">'+rupee(value)+'</b></div>').join('');spendEmpty.style.display=rows.length?'none':'block';}
 const totalBudget=Math.max(0,Number(data.budget)||0),planned=Math.max(0,Number(t.planned)||0),spent=Math.max(0,Number(t.spent)||0),allocated=Math.min(totalBudget,planned),remaining=Math.max(0,totalBudget-allocated),percent=totalBudget?Math.round(100*allocated/totalBudget):0;
 const donut=$('budget-donut');if(donut){const deg=totalBudget?360*allocated/totalBudget:0;donut.style.background='conic-gradient(#71866d 0deg '+deg+'deg,#dfe7da '+deg+'deg 360deg)';$('donut-percent').textContent=percent+'%';$('donut-planned').textContent=rupee(allocated);$('donut-remaining').textContent=rupee(remaining);$('donut-spent').textContent=rupee(spent);}
+const trend=$('sales-trend-chart'),trendEmpty=$('sales-trend-empty');
+if(trend&&trendEmpty){const now=new Date();const months=[];for(let offset=5;offset>=0;offset--){const d=new Date(now.getFullYear(),now.getMonth()-offset,1);months.push({key:d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'),label:d.toLocaleDateString('en-IN',{month:'short'}),value:0});}data.sales.forEach(s=>{const key=String(s.date||'').slice(0,7),month=months.find(m=>m.key===key);if(month)month.value+=(Number(s.qty)||0)*(Number(s.price)||0);});const max=Math.max(1,...months.map(m=>m.value));trend.innerHTML=months.map(m=>'<div class="trend-month"><span class="trend-value">'+(m.value?rupee(m.value):'—')+'</span><div class="trend-bar-zone"><div class="trend-bar" style="height:'+Math.max(m.value?4:0,100*m.value/max)+'%"></div></div><span class="trend-label">'+m.label+'</span></div>').join('');trendEmpty.style.display=data.sales.length?'none':'block';}
+const stockWatch=$('stock-watch-list');if(stockWatch){const low=data.inventory.filter(r=>Number(r.qty)>=0&&Number(r.qty)<=5&&String(r.name||'').trim()).sort((a,b)=>(Number(a.qty)||0)-(Number(b.qty)||0)).slice(0,4);stockWatch.innerHTML=low.length?low.map(r=>'<div class="stock-watch-item"><span class="stock-watch-symbol">♧</span><div class="stock-watch-copy"><b>'+esc(r.name)+'</b><small>'+esc(r.type||'Clothing')+(r.size?' · '+esc(r.size):'')+(r.colour?' · '+esc(r.colour):'')+'</small></div><span class="stock-watch-qty">'+(Number(r.qty)||0)+' left</span></div>').join(''):'<div class="stock-watch-ok">✓ No low-stock alerts. Items with 5 or fewer units will appear here.</div>';}
 }
 
 function renderBudget(){ $('budget-total').value=data.budget;$('business-status').value=data.status||'Exploring options';$('budget-table').innerHTML=data.budgetRows.map((r,i)=>'<tr><td>'+input(r.name,'name')+'</td><td>'+input(r.planned,'planned','number','0')+'</td><td>'+input(r.actual,'actual','number','0')+'</td><td>'+rupee((+r.planned||0)-(+r.actual||0))+'</td><td>'+removeBtn(i,'budget')+'</td></tr>').join('');const t=totals();$('budget-summary').textContent=rupee(t.planned)+' allocated of '+rupee(data.budget);$('budget-page-progress').style.width=Math.min(100,data.budget?100*t.planned/data.budget:0)+'%';$('budget-plan-total').textContent=rupee(t.planned);$('budget-actual-total').textContent=rupee(t.actual);$('budget-diff-total').textContent=rupee(t.planned-t.actual)}
