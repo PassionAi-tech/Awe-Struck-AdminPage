@@ -54,14 +54,14 @@ create policy "Members can view workspace membership"
 on public.awestruck_members for select to authenticated
 using (exists (
   select 1 from public.awestruck_members mine
-  where mine.workspace_id = workspace_id and mine.user_id = (select auth.uid())
+  where mine.workspace_id = awestruck_members.workspace_id and mine.user_id = (select auth.uid())
 ));
 
 create policy "Owners can add workspace members"
 on public.awestruck_members for insert to authenticated
 with check (exists (
   select 1 from public.awestruck_members owner_row
-  where owner_row.workspace_id = workspace_id
+  where owner_row.workspace_id = awestruck_members.workspace_id
     and owner_row.user_id = (select auth.uid())
     and owner_row.role = 'owner'
 ));
@@ -70,7 +70,7 @@ create policy "Owners can remove workspace members"
 on public.awestruck_members for delete to authenticated
 using (exists (
   select 1 from public.awestruck_members owner_row
-  where owner_row.workspace_id = workspace_id
+  where owner_row.workspace_id = awestruck_members.workspace_id
     and owner_row.user_id = (select auth.uid())
     and owner_row.role = 'owner'
 ));
@@ -79,25 +79,25 @@ create policy "Workspace members can read shared data"
 on public.awestruck_workspace_data for select to authenticated
 using (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = workspace_id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
 ));
 
 create policy "Workspace members can insert shared data"
 on public.awestruck_workspace_data for insert to authenticated
 with check (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = workspace_id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
 ));
 
 create policy "Workspace members can update shared data"
 on public.awestruck_workspace_data for update to authenticated
 using (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = workspace_id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
 ))
 with check (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = workspace_id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
 ));
 
 grant select, update on public.awestruck_workspaces to authenticated;
