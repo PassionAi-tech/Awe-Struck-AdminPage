@@ -1,7 +1,7 @@
--- Awe-Struck shared workspace database
--- Apply this file in the SQL Editor of project knnviulwnsoynxfznhck.
--- This schema keeps all business data in one JSONB document per workspace,
--- while enforcing access through authenticated workspace membership.
+-- Awe-Struck shared workspace database schema
+-- Run in the SQL Editor of Supabase project knnviulwnsoynxfznhck.
+-- Each signed-up user gets a private workspace. Add family users to the same
+-- workspace using the owner-only SQL procedure in README after their account exists.
 
 create table public.awestruck_workspaces (
   id uuid primary key default gen_random_uuid(),
@@ -17,7 +17,6 @@ create table public.awestruck_members (
   created_at timestamptz not null default now(),
   primary key (workspace_id, user_id)
 );
-
 create index awestruck_members_user_id_idx on public.awestruck_members(user_id);
 
 create table public.awestruck_workspace_data (
@@ -31,84 +30,68 @@ alter table public.awestruck_workspaces enable row level security;
 alter table public.awestruck_members enable row level security;
 alter table public.awestruck_workspace_data enable row level security;
 
--- Authenticated users can only see workspaces where they are members.
+-- Membership reads are restricted to the signed-in user's own membership row.
+create policy "Users can view their own workspace memberships"
+on public.awestruck_members for select to authenticated
+using (user_id = (select auth.uid()));
+
 create policy "Members can view their workspaces"
 on public.awestruck_workspaces for select to authenticated
 using (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspaces.id
+    and m.user_id = (select auth.uid())
 ));
 
-create policy "Owners can update their workspace"
+create policy "Workspace owners can update workspace details"
 on public.awestruck_workspaces for update to authenticated
 using (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = id and m.user_id = (select auth.uid()) and m.role = 'owner'
+  where m.workspace_id = awestruck_workspaces.id
+    and m.user_id = (select auth.uid()) and m.role = 'owner'
 ))
 with check (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = id and m.user_id = (select auth.uid()) and m.role = 'owner'
+  where m.workspace_id = awestruck_workspaces.id
+    and m.user_id = (select auth.uid()) and m.role = 'owner'
 ));
 
-create policy "Members can view workspace membership"
-on public.awestruck_members for select to authenticated
-using (exists (
-  select 1 from public.awestruck_members mine
-  where mine.workspace_id = awestruck_members.workspace_id and mine.user_id = (select auth.uid())
-));
-
-create policy "Owners can add workspace members"
-on public.awestruck_members for insert to authenticated
-with check (exists (
-  select 1 from public.awestruck_members owner_row
-  where owner_row.workspace_id = awestruck_members.workspace_id
-    and owner_row.user_id = (select auth.uid())
-    and owner_row.role = 'owner'
-));
-
-create policy "Owners can remove workspace members"
-on public.awestruck_members for delete to authenticated
-using (exists (
-  select 1 from public.awestruck_members owner_row
-  where owner_row.workspace_id = awestruck_members.workspace_id
-    and owner_row.user_id = (select auth.uid())
-    and owner_row.role = 'owner'
-));
-
-create policy "Workspace members can read shared data"
+create policy "Members can read shared workspace data"
 on public.awestruck_workspace_data for select to authenticated
 using (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspace_data.workspace_id
+    and m.user_id = (select auth.uid())
 ));
 
-create policy "Workspace members can insert shared data"
+create policy "Members can create shared workspace data"
 on public.awestruck_workspace_data for insert to authenticated
 with check (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspace_data.workspace_id
+    and m.user_id = (select auth.uid())
 ));
 
-create policy "Workspace members can update shared data"
+create policy "Members can update shared workspace data"
 on public.awestruck_workspace_data for update to authenticated
 using (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspace_data.workspace_id
+    and m.user_id = (select auth.uid())
 ))
 with check (exists (
   select 1 from public.awestruck_members m
-  where m.workspace_id = awestruck_workspaces.id and m.user_id = (select auth.uid())
+  where m.workspace_id = awestruck_workspace_data.workspace_id
+    and m.user_id = (select auth.uid())
 ));
 
 grant select, update on public.awestruck_workspaces to authenticated;
-grant select, insert, delete on public.awestruck_members to authenticated;
+grant select on public.awestruck_members to authenticated;
 grant select, insert, update on public.awestruck_workspace_data to authenticated;
 revoke all on public.awestruck_workspaces from anon;
 revoke all on public.awestruck_members from anon;
 revoke all on public.awestruck_workspace_data from anon;
 
--- Create one private Awe-Struck workspace automatically for each new auth user.
--- A family owner can add additional authenticated users to the same workspace.
 create or replace function public.awestruck_create_workspace_for_new_user()
 returns trigger
 language plpgsql
@@ -131,7 +114,6 @@ begin
   return new;
 end;
 $$;
-
 revoke all on function public.awestruck_create_workspace_for_new_user() from public, anon, authenticated;
 
 create trigger awestruck_create_workspace_after_signup
