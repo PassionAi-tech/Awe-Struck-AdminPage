@@ -100,145 +100,110 @@ document.addEventListener('click',e=>{const b=e.target.closest('[data-delete]');
 $('save-settings').onclick=()=>{data.settings={name:$('store-name').value,location:$('store-location').value,currency:$('store-currency').value,notes:$('store-notes').value};save();toast('Store details saved')};
 $('export-data').onclick=()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='awe-struck-backup-'+today()+'.json';a.click();URL.revokeObjectURL(a.href);toast('Backup exported')};$('import-trigger').onclick=()=>$('import-file').click();$('import-file').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{const parsed=JSON.parse(await f.text());if(!parsed.budgetRows||!parsed.settings)throw Error('Invalid backup');if(confirm('Replace current workspace data with this backup?')){data=parsed;save();renderAll();toast('Backup restored')}}catch(err){alert('Could not import this file. Choose a valid Awe-Struck JSON backup.')}e.target.value=''};$('clear-data').onclick=()=>{if(confirm('This will delete all Awe-Struck data saved in this browser. Export a backup first if needed. Continue?')){data=starter();save();renderAll();toast('Workspace reset')}};
 renderAll();
-connectCloud();
-  
-/* Awe-Struck shared testing sync */
+// Disabled legacy per-device cloud connection; shared testing sync is used below.
+/* Awe-Struck shared testing sync: one shared cloud record for all devices */
+let sharedWriteInFlight = false;
 setTimeout(async function () {
   try {
     const cfg = window.AWESTRUCK_SUPABASE_CONFIG;
-    const client = window.supabase.createClient(
-      cfg.url,
-      cfg.publishableKey,
-      { auth: { persistSession: false, autoRefreshToken: false } }
-    );
-
+    if (!cfg || !window.supabase || !window.supabase.createClient) {
+      throw new Error("Supabase config or library did not load.");
+    }
+    const client = window.supabase.createClient(cfg.url, cfg.publishableKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
     cloudClient = client;
-    cloudReady = false;
 
     async function readShared() {
-      const result = await client
+      const { data: row, error } = await client
         .from("awestruck_shared_store_data")
         .select("payload, updated_at")
         .eq("id", true)
         .maybeSingle();
+      if (error) throw error;
+      return row;
+    }
 
-      if (result.error) throw result.error;
-      return result.data;
+    async function writeShared(payload) {
+      const stamp = new Date().toISOString();
+      sharedWriteInFlight = true;
+      try {
+        const { error } = await client
+          .from("awestruck_shared_store_data")
+          .upsert({ id: true, payload, updated_at: stamp }, { onConflict: "id" });
+        if (error) throw error;
+        cloudLastUpdated = stamp;
+        setCloudStatus("☁️ Shared testing data saved.");
+      } finally {
+        sharedWriteInFlight = false;
+      }
     }
 
     let row = await readShared();
-
-    if (row && row.payload &&
-        Object.keys(row.payload).length > 0) {
-      cloudLastUpdated = row.updated_at;
+    if (row && row.payload && Object.keys(row.payload).length) {
       cloudApplying = true;
-
       const base = starter();
       data = {
         ...base,
         ...row.payload,
-        settings: {
-          ...base.settings,
-          ...(row.payload.settings || {})
-        }
+        settings: { ...base.settings, ...(row.payload.settings || {}) }
       };
-
-      localStorage.setItem(
-        "awestruck-admin-v1",
-        JSON.stringify(data)
-      );
-
+      localStorage.setItem("awestruck-admin-v1", JSON.stringify(data));
+      cloudLastUpdated = row.updated_at;
       cloudApplying = false;
       renderAll();
     } else {
-      const stamp = new Date().toISOString();
-      const result = await client
-        .from("awestruck_shared_store_data")
-        .upsert(
-          { id: true, payload: data, updated_at: stamp },
-          { onConflict: "id" }
-        );
-
-      if (result.error) throw result.error;
-      cloudLastUpdated = stamp;
+      await writeShared(data);
     }
 
+    // Replace the old per-device save path with the shared record.
     save = function () {
-      localStorage.setItem(
-        "awestruck-admin-v1",
-        JSON.stringify(data)
-      );
+      localStorage.setItem("awestruck-admin-v1", JSON.stringify(data));
       renderDashboard();
-
-      if (!cloudApplying) {
-        clearTimeout(cloudSaveTimer);
-        cloudSaveTimer = setTimeout(async function () {
-          try {
-            const stamp = new Date().toISOString();
-            const result = await client
-              .from("awestruck_shared_store_data")
-              .upsert(
-                { id: true, payload: data, updated_at: stamp },
-                { onConflict: "id" }
-              );
-
-            if (result.error) throw result.error;
-
-            cloudLastUpdated = stamp;
-            setCloudStatus("☁️ Shared data saved.");
-          } catch (error) {
-            setCloudStatus("⚠️ Sync failed: " + error.message);
-          }
-        }, 500);
-      }
+      if (cloudApplying) return;
+      if (cloudSaveTimer) clearTimeout(cloudSaveTimer);
+      cloudSaveTimer = setTimeout(async function () {
+        cloudSaveTimer = null;
+        try {
+          await writeShared(data);
+        } catch (error) {
+          console.error("Shared save failed:", error);
+          setCloudStatus("⚠️ Shared save failed: " + error.message);
+        }
+      }, 500);
     };
 
     cloudReady = true;
     setCloudStatus("☁️ Shared testing workspace connected.");
 
     setInterval(async function () {
-      if (!cloudReady || cloudApplying || cloudSaveTimer) return;
-
+      if (!cloudReady || cloudApplying || cloudSaveTimer || sharedWriteInFlight) return;
       try {
         const latest = await readShared();
-
-        if (!latest ||
-            !latest.updated_at ||
-            latest.updated_at === cloudLastUpdated) return;
-
-        cloudLastUpdated = latest.updated_at;
+        if (!latest || !latest.updated_at || latest.updated_at === cloudLastUpdated) return;
         cloudApplying = true;
-
         const base = starter();
         data = {
           ...base,
-          ...latest.payload,
-          settings: {
-            ...base.settings,
-            ...(latest.payload.settings || {})
-          }
+          ...(latest.payload || {}),
+          settings: { ...base.settings, ...((latest.payload || {}).settings || {}) }
         };
-
-        localStorage.setItem(
-          "awestruck-admin-v1",
-          JSON.stringify(data)
-        );
-
+        localStorage.setItem("awestruck-admin-v1", JSON.stringify(data));
+        cloudLastUpdated = latest.updated_at;
         cloudApplying = false;
         renderAll();
         setCloudStatus("☁️ Updated from another device.");
       } catch (error) {
         cloudApplying = false;
         console.error("Shared sync error:", error);
+        setCloudStatus("⚠️ Shared sync error: " + error.message);
       }
-    }, 2500);
-
+    }, 2000);
   } catch (error) {
     cloudApplying = false;
     cloudReady = false;
     console.error("Shared workspace error:", error);
     setCloudStatus("⚠️ Shared sync failed: " + error.message);
   }
-}, 1500);
-
+}, 800);
 </script></body></html>
